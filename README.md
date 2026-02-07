@@ -48,12 +48,63 @@ In production, we simply:
 
 ## The Algorithm
 
-The Final Priority Score (0-200) is a weighted sum of:
+The Final Priority Score (0-200) is calculated as follows:
 
-1.  **AI Semantic Score (0-100)**: Based on embedding distance to Risk Anchors.
-2.  **Financial Tier (MRR)**: Logarithmic boost for high-value clients.
-3.  **Tempo & Recurrence**: Penalties for stagnation (days open) and repeated issues (historical frequency).
+### 1. AI Semantic Score (0-100)
+Calculated using Cosine Similarity ($sim$) against three anchor types: **Risk**, **Polite**, and **Ignore**.
+
+$$
+sim(u, v) = \frac{u \cdot v}{\|u\| \|v\|}
+$$
+
+**Logic:**
+*   If `ignore_sim > risk_sim` $\rightarrow$ **Score: 0**
+*   If `polite_sim > risk_sim * 1.1` $\rightarrow$ **Score: 0**
+*   If `risk_sim < 0.42` (Similarity Threshold) $\rightarrow$ **Score: 0**
+*   **Default**: $50 + (risk\_sim - 0.42) \times 100$
+*   *Explicit Urgency Override*: If specific keywords are found $\rightarrow$ **Score: 85**
+
+### 2. Business Boosters (0-100)
+*   **Financial Tier**: $\log_{10}(MRR + 1) \times 5 \times TierMultiplier$ (Max ~30 pts)
+*   **Recurrence**: +15 points if the client has >5 past tickets.
+*   **Stagnation**: `min(days_open, 20)` points.
+
+**Final Score Formula**:
+$$
+Score = AI\_Score + Financial + Recurrence + Time
+$$
+
+*(If AI\_Score is 0, the Final Score is forced to 0 to avoid false positives)*
 
 **Result**: Precision@30 of **96.67%**.
+
+---
+
+## Cost Analysis (Scale: 100k Tickets)
+
+How much does it cost to process **100,000 tickets** using this architecture?
+
+**Assumptions**:
+*   Average ticket length: **300 tokens**.
+*   Model: OpenAI `text-embedding-3-small`.
+*   Price: **$0.02 / 1M tokens**.
+
+### The Math:
+$$
+100,000 \text{ tickets} \times 300 \text{ tokens} = 30,000,000 \text{ tokens}
+$$
+$$
+30M \text{ tokens} \times \$0.02 = \mathbf{\$0.60}
+$$
+
+### Comparison vs. LLM Approach
+
+| Approach | Model | Cost per 1M Tokens | Monthly Cost (100k tickets) |
+| :--- | :--- | :--- | :--- |
+| **Our Solution (Embeddings)** | **text-embedding-3-small** | **$0.02** | **$0.60** |
+| LLM (GPT-4o-mini) | GPT-4o-mini | $0.15 (In) / $0.60 (Out) | ~$10.50 |
+| LLM (GPT-4o) | GPT-4o | $5.00 (In) / $15.00 (Out) | ~$350.00 |
+
+**Conclusion**: This solution is **94% cheaper** than the cheapest LLM and **99.8% cheaper** than GPT-4o, while being faster and more deterministic.
 
 ---
